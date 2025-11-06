@@ -1,11 +1,11 @@
 /*
  * 50/60 Hz mains clock -> static 6-digit 7-seg (HH:MM:SS)
- * - Template 'clk' is the AC tick (50/60 Hz selectable by ui_in[5])
- * - ui_in[0] = PPS (pulse-per-second). If a rising edge is seen, seconds align to it.
- * - set_mode: inc_* wrap field only (no cascade)
+ * Inputs (ui_in):
+ *   [0]=PPS, [1]=set_mode, [2]=inc_hours, [3]=inc_minutes, [4]=inc_seconds,
+ *   [5]=ac50_sel (0=60 Hz, 1=50 Hz), [6]=hour_12h, [7]=spare
  * Outputs:
  *   uo_out[7]   = Colon LED (toggles each second)
- *   uo_out[6:0] = Shared segment bus {a,b,c,d,e,f,g} to all digits (no dp)
+ *   uo_out[6:0] = Shared 7-seg bus {a,b,c,d,e,f,g} (no dp)
  *   uio_out[5:0]= 6 latch-enables (Ht,Ho,Mt,Mo,St,So)
  *   uio_out[6]  = PM (1 in 12h mode for 12..23)
  *   uio_out[7]  = 1 Hz pulse (1 AC tick wide each second)
@@ -15,37 +15,34 @@
 
 // ===================== TOP =======================
 module tt_um_example (
-    input  wire [7:0] ui_in,    // Dedicated inputs
-    output wire [7:0] uo_out,   // [7]=colon LED, [6:0]={a..g}
-    input  wire [7:0] uio_in,   // IOs: Input path (unused)
-    output wire [7:0] uio_out,  // IOs: Output path
-    output wire [7:0] uio_oe,   // IOs: Enable path (1=drive)
-    input  wire       ena,      // always 1 (unused)
-    input  wire       clk,      // AC-derived logic clock: 50/60 Hz
-    input  wire       rst_n     // reset_n - low to reset
+    input  wire [7:0] ui_in,
+    output wire [7:0] uo_out,   // [7]=colon, [6:0]={a..g}
+    input  wire [7:0] uio_in,
+    output wire [7:0] uio_out,
+    output wire [7:0] uio_oe,
+    input  wire       ena,
+    input  wire       clk,      // 50/60 Hz AC tick
+    input  wire       rst_n
 );
 
-  // --------- Inputs ---------
-  wire pps_in      = ui_in[0];  // PPS (>=1 AC tick wide pulse)
+  // Inputs
+  wire pps_in      = ui_in[0];
   wire set_mode    = ui_in[1];
   wire inc_hours   = ui_in[2];
   wire inc_minutes = ui_in[3];
   wire inc_seconds = ui_in[4];
-  wire ac50_sel    = ui_in[5];  // 0=60 Hz, 1=50 Hz
+  wire ac50_sel    = ui_in[5];
   wire hour_12h    = ui_in[6];
-  // ui_in[7] spare
 
   wire rst    = ~rst_n;
   wire clk_ac = clk;
 
-  // --------- Time core ---------
+  // Time core
   wire [23:0] bcd24;
   wire        pm_led, colon_1hz;
   wire        sec_pulse_1hz;
 
-  time_core_ac_bcd24 #(
-    .DEB_LEN(3)
-  ) u_time (
+  time_core_ac_bcd24 #(.DEB_LEN(3)) u_time (
     .clk_ac       (clk_ac),
     .rst          (rst),
     .ac50_sel     (ac50_sel),
@@ -61,13 +58,13 @@ module tt_um_example (
     .sec_pulse_1hz(sec_pulse_1hz)
   );
 
-  // --------- 7-seg driver (no dp) ---------
+  // 7-seg driver (shared bus + 6 latch enables)
   wire [6:0] seg7_bus; // {a,b,c,d,e,f,g}
-  wire [5:0] le;       // one-hot pulse per digit: {Ht,Ho,Mt,Mo,St,So}
+  wire [5:0] le;       // {Ht,Ho,Mt,Mo,St,So}
 
   bcd24_to_seg7_latched #(
-    .SEG_ACTIVE_LOW(1'b0),   // 0=common-cathode (active-high), 1=common-anode (active-low)
-    .LE_ACTIVE_HIGH(1'b1)    // set to 0 if your latches are active-low
+    .SEG_ACTIVE_LOW(1'b0),   // 0=common-cathode, 1=common-anode
+    .LE_ACTIVE_HIGH(1'b1)
   ) u_seg (
     .clk_ac  (clk_ac),
     .rst     (rst),
@@ -76,28 +73,28 @@ module tt_um_example (
     .le      (le)
   );
 
-  // --------- Map to pins ---------
-  assign uo_out[6:0] = seg7_bus;    // {a..g}
-  assign uo_out[7]   = colon_1hz;   // toggles once per second
+  // Pin mapping
+  assign uo_out[6:0] = seg7_bus;
+  assign uo_out[7]   = colon_1hz;
 
   assign uio_out[5:0] = le;
-  assign uio_out[6]   = pm_led;         // PM indicator
-  assign uio_out[7]   = sec_pulse_1hz;  // 1 AC-tick pulse each second
-  assign uio_oe       = 8'b11111111;    // drive all uio_out pins
+  assign uio_out[6]   = pm_led;
+  assign uio_out[7]   = sec_pulse_1hz;
+  assign uio_oe       = 8'hFF;
 
-  // Tie off unused to avoid warnings
+  // Unused
   wire _unused = &{ena, uio_in, ui_in[7], 1'b0};
 
 endmodule
 
-// =================== TIME CORE ===================
+// =================== TIME CORE (no 1-tick delay) ===================
 module time_core_ac_bcd24 #(
-    parameter integer DEB_LEN = 3   // debounce depth in AC ticks (N>=2)
+    parameter integer DEB_LEN = 3
 )(
-    input  wire        clk_ac,      // 50/60 Hz logic clock
+    input  wire        clk_ac,
     input  wire        rst,
     input  wire        ac50_sel,    // 1=50Hz, 0=60Hz
-    input  wire        pps_in,      // PPS (>=1 AC tick wide)
+    input  wire        pps_in,      // >=1 AC tick wide
     input  wire        set_mode,
     input  wire        inc_hours,
     input  wire        inc_minutes,
@@ -105,10 +102,10 @@ module time_core_ac_bcd24 #(
     input  wire        hour_12h,
     output wire [23:0] bcd24,       // {Ht,Ho,Mt,Mo,St,So}
     output reg         pm_led,
-    output reg         colon_1hz,   // toggles each second
-    output reg         sec_pulse_1hz// 1 AC-tick pulse at each second boundary
+    output reg         colon_1hz,
+    output reg         sec_pulse_1hz
 );
-    // Debounce (AC domain)
+    // Debouncers (AC domain)
     wire set_d, ih_d, im_d, is_d, mode12_d;
     debounce_sr #(.N(DEB_LEN)) db_set (.clk(clk_ac), .din(set_mode),   .dout(set_d));
     debounce_sr #(.N(DEB_LEN)) db_ih  (.clk(clk_ac), .din(inc_hours),  .dout(ih_d));
@@ -116,70 +113,65 @@ module time_core_ac_bcd24 #(
     debounce_sr #(.N(DEB_LEN)) db_is  (.clk(clk_ac), .din(inc_seconds),.dout(is_d));
     debounce_sr #(.N(DEB_LEN)) db_12  (.clk(clk_ac), .din(hour_12h),   .dout(mode12_d));
 
-    // Rising-edge detectors for single-step
+    // Rising-edge detectors
     reg ih_q, im_q, is_q;
     always @(posedge clk_ac) begin
         if (rst) begin ih_q<=1'b0; im_q<=1'b0; is_q<=1'b0; end
-        else begin ih_q<=ih_d; im_q<=im_d; is_q<=is_d; end
+        else       begin ih_q<=ih_d; im_q<=im_d; is_q<=is_d; end
     end
     wire inc_h_pulse = ih_d & ~ih_q;
     wire inc_m_pulse = im_d & ~im_q;
     wire inc_s_pulse = is_d & ~is_q;
 
-    // PPS synchronizer & edge detect (sampled at AC rate)
+    // PPS sampled at AC rate
     reg pps_q;
     always @(posedge clk_ac) begin
         if (rst) pps_q <= 1'b0;
         else     pps_q <= pps_in;
     end
-    wire pps_edge = pps_in & ~pps_q;  // requires PPS high at an AC clock edge
+    wire pps_edge = pps_in & ~pps_q;
 
     // Divider
-    reg [5:0] ac_div;
-    wire [5:0] ac_top   = ac50_sel ? 6'd49 : 6'd59;   // count 0..49 or 0..59
+    reg  [5:0] ac_div;
+    wire [5:0] ac_top   = ac50_sel ? 6'd49 : 6'd59;   // 0..49 or 0..59
     wire       run_mode = ~set_d;
 
-    // --- NEW: combinational second tick (no 1-cycle latency) ---
-    // Based on *current* state: tick when PPS rises OR divider == top, but only in run mode.
+    // Combinational "this edge" second tick
     wire sec_tick = run_mode && (pps_edge || (ac_div == ac_top));
 
-    // Divider + colon + 1Hz pulse (use sec_tick)
+    // Divider / colon / 1 Hz pulse (no 1-tick latency)
     always @(posedge clk_ac) begin
         if (rst) begin
             ac_div        <= 6'd0;
             colon_1hz     <= 1'b0;
             sec_pulse_1hz <= 1'b0;
         end else begin
-            sec_pulse_1hz <= 1'b0; // default
-
+            sec_pulse_1hz <= 1'b0;
             if (run_mode) begin
                 if (sec_tick) begin
                     ac_div        <= 6'd0;
-                    sec_pulse_1hz <= 1'b1;      // mirrors sec_tick for one AC tick
                     colon_1hz     <= ~colon_1hz;
+                    sec_pulse_1hz <= 1'b1;
                 end else begin
                     ac_div <= ac_div + 6'd1;
                 end
             end
-            // set_mode: freeze divider & no pulses
         end
     end
 
-    // Timekeeping in BCD (24h base)
+    // BCD time counters (24h base)
     reg [3:0] ss_1, ss_10;  // 00..59
     reg [3:0] mm_1, mm_10;  // 00..59
     reg [3:0] hh_1, hh_10;  // 00..23
 
-    // Run vs set behavior (no cascade in set mode)
-    wire sec_roll     = (ss_1 == 4'd9) && (ss_10 == 4'd5);  // 59
-    wire min_roll     = (mm_1 == 4'd9) && (mm_10 == 4'd5);  // 59
+    wire sec_roll     = (ss_1 == 4'd9) && (ss_10 == 4'd5);
+    wire min_roll     = (mm_1 == 4'd9) && (mm_10 == 4'd5);
 
-    // --- Use sec_tick directly so seconds/minutes/hours update in the *same* AC edge ---
-    wire add_sec      = run_mode ? sec_tick : inc_s_pulse;
+    wire add_sec      = run_mode ? sec_tick                      : inc_s_pulse;
     wire run_add_min  = run_mode && sec_tick && sec_roll;
-    wire add_min      = run_mode ? run_add_min  : inc_m_pulse;
+    wire add_min      = run_mode ? run_add_min                   : inc_m_pulse;
     wire run_add_hour = run_mode && run_add_min && min_roll;
-    wire add_hour     = run_mode ? run_add_hour : inc_h_pulse;
+    wire add_hour     = run_mode ? run_add_hour                  : inc_h_pulse;
 
     // seconds
     always @(posedge clk_ac) begin
@@ -213,25 +205,33 @@ module time_core_ac_bcd24 #(
         end
     end
 
-    // 24h -> 12h display + PM flag
-    reg  [5:0] h24, h12;     // 0..23 / 1..12
-    reg        t12;          // 0/1 for tens
+    // ---------- 24h -> 12h display (no latches, no width warnings) ----------
+    reg  [5:0] h24, h12, ones12_6;
+    reg        t12;
     reg  [3:0] disp_h_10, disp_h_1, ones12;
 
     always @* begin
-        h24    = (hh_10 * 6'd10) + {2'b00, hh_1};
-        pm_led = (mode12_d && (h24 >= 6'd12)) ? 1'b1 : 1'b0;
+        // defaults (24h display)
+        h24        = (hh_10 * 6'd10) + {2'b00, hh_1};
+        pm_led     = 1'b0;
+        disp_h_10  = hh_10;
+        disp_h_1   = hh_1;
+        h12        = 6'd0;
+        t12        = 1'b0;
+        ones12_6   = 6'd0;
+        ones12     = 4'd0;
 
-        if (!mode12_d) begin
-            disp_h_10 = hh_10;
-            disp_h_1  = hh_1;
-        end else begin
+        if (mode12_d) begin
+            pm_led = (h24 >= 6'd12);
+
+            // 0 -> 12, 1..12 -> same, 13..23 -> minus 12
             if (h24 == 6'd0)       h12 = 6'd12;
             else if (h24 <= 6'd12) h12 = h24;
             else                   h12 = h24 - 6'd12;
 
-            t12    = (h12 >= 6'd10);
-            ones12 = h12 - (t12 ? 6'd10 : 6'd0);
+            t12       = (h12 >= 6'd10);
+            ones12_6  = t12 ? (h12 - 6'd10) : h12; // 0..9 (6-bit)
+            ones12    = ones12_6[3:0];
 
             disp_h_10 = {3'b000, t12}; // 0 or 1
             disp_h_1  = ones12;        // 0..9
@@ -241,19 +241,18 @@ module time_core_ac_bcd24 #(
     assign bcd24 = {disp_h_10, disp_h_1, mm_10, mm_1, ss_10, ss_1};
 endmodule
 
-
 // =================== 7-SEG DRIVER (no dp) ===================
 module bcd24_to_seg7_latched #(
-    parameter SEG_ACTIVE_LOW = 1'b0,  // 0=active-high (common-cathode), 1=active-low (common-anode)
-    parameter LE_ACTIVE_HIGH = 1'b1   // 1=LE high pulses, 0=LE low pulses
+    parameter SEG_ACTIVE_LOW = 1'b0,  // 0=active-high, 1=active-low
+    parameter LE_ACTIVE_HIGH = 1'b1
 )(
     input  wire        clk_ac,
     input  wire        rst,
     input  wire [23:0] bcd24,        // {Ht,Ho,Mt,Mo,St,So}
-    output reg  [6:0]  seg7_bus,     // {a,b,c,d,e,f,g} shared to all digits
-    output reg  [5:0]  le            // one-hot latch enables {Ht,Ho,Mt,Mo,St,So}
+    output reg  [6:0]  seg7_bus,     // {a,b,c,d,e,f,g}
+    output reg  [5:0]  le            // one-hot LEs {Ht,Ho,Mt,Mo,St,So}
 );
-    // Unpack nibbles
+    // Unpack
     wire [3:0] Ht = bcd24[23:20];
     wire [3:0] Ho = bcd24[19:16];
     wire [3:0] Mt = bcd24[15:12];
@@ -261,10 +260,10 @@ module bcd24_to_seg7_latched #(
     wire [3:0] St = bcd24[7:4];
     wire [3:0] So = bcd24[3:0];
 
-    // Phase: which digit to latch this AC tick
+    // Phase
     reg [2:0] phase;
 
-    // 7-seg encoder: returns {a,b,c,d,e,f,g} active-high
+    // 7-seg encoder: returns {a..g} active-high
     function [6:0] enc7;
         input [3:0] d;
         begin
@@ -284,15 +283,13 @@ module bcd24_to_seg7_latched #(
         end
     endfunction
 
-    // Polarity adapt (keeps {a..g} order)
     function [6:0] adapt7;
-        input [6:0] abcd_efg;
+        input [6:0] abcd_efg; // {a..g}
         begin
             adapt7 = SEG_ACTIVE_LOW ? ~abcd_efg : abcd_efg;
         end
     endfunction
 
-    // active level for LE pin
     wire [5:0] LE_ON  = LE_ACTIVE_HIGH ? 6'b111111 : 6'b000000;
     wire [5:0] LE_OFF = LE_ACTIVE_HIGH ? 6'b000000 : 6'b111111;
 
@@ -305,46 +302,53 @@ module bcd24_to_seg7_latched #(
             le <= LE_OFF;
 
             case (phase)
-                3'd0: begin seg7_bus <= adapt7(enc7(Ht)); le[0] <= LE_ON[0]; end // Hour tens
-                3'd1: begin seg7_bus <= adapt7(enc7(Ho)); le[1] <= LE_ON[1]; end // Hour ones
-                3'd2: begin seg7_bus <= adapt7(enc7(Mt)); le[2] <= LE_ON[2]; end // Minute tens
-                3'd3: begin seg7_bus <= adapt7(enc7(Mo)); le[3] <= LE_ON[3]; end // Minute ones
-                3'd4: begin seg7_bus <= adapt7(enc7(St)); le[4] <= LE_ON[4]; end // Second tens
-                3'd5: begin seg7_bus <= adapt7(enc7(So)); le[5] <= LE_ON[5]; end // Second ones
+                3'd0: begin seg7_bus <= adapt7(enc7(Ht)); le[0] <= LE_ON[0]; end
+                3'd1: begin seg7_bus <= adapt7(enc7(Ho)); le[1] <= LE_ON[1]; end
+                3'd2: begin seg7_bus <= adapt7(enc7(Mt)); le[2] <= LE_ON[2]; end
+                3'd3: begin seg7_bus <= adapt7(enc7(Mo)); le[3] <= LE_ON[3]; end
+                3'd4: begin seg7_bus <= adapt7(enc7(St)); le[4] <= LE_ON[4]; end
+                3'd5: begin seg7_bus <= adapt7(enc7(So)); le[5] <= LE_ON[5]; end
                 default: begin seg7_bus <= adapt7(enc7(4'd0)); end
             endcase
 
-            // advance to next digit each AC tick
             phase <= (phase == 3'd5) ? 3'd0 : (phase + 3'd1);
         end
     end
 endmodule
 
-// =================== Debouncer (look-ahead, exact N ticks) ===================
+// =================== Debouncer (N-window, no unused-bit warn) ===================
 module debounce_sr #(
-    parameter integer N = 3   // N >= 2 recommended
+    parameter integer N = 3   // N >= 1
 )(
     input  wire clk,
     input  wire din,
     output reg  dout
 );
-    // compute next shift value to include the current sample
     generate
-      if (N == 1) begin : gen_n1
+      if (N <= 1) begin : gen_n1
         always @(posedge clk) begin
-          if (din)      dout <= 1'b1;
-          else          dout <= 1'b0;
+          dout <= din;
         end
-      end else begin : gen_nge2
-        reg  [N-1:0] sh;
-        wire [N-1:0] sh_next = {sh[N-2:0], din};
-        wire         all1    = &sh_next;
-        wire         all0    = ~|sh_next;
+      end else if (N == 2) begin : gen_n2
+        reg sh;                // 1 previous sample
+        wire all1 = &{sh, din};
+        wire all0 = ~|{sh, din};
+        always @(posedge clk) begin
+          sh <= din;           // shift in
+          if (all1)      dout <= 1'b1;
+          else if (all0) dout <= 1'b0;
+          // else hold
+        end
+      end else begin : gen_nge3
+        reg  [N-2:0] sh;       // last N-1 samples
+        wire [N-2:0] sh_next = {sh[N-3:0], din};
+        wire         all1    = &{sh, din};   // exactly N window
+        wire         all0    = ~|{sh, din};
         always @(posedge clk) begin
           sh <= sh_next;
           if (all1)      dout <= 1'b1;
           else if (all0) dout <= 1'b0;
-          // else hold last dout
+          // else hold
         end
       end
     endgenerate
