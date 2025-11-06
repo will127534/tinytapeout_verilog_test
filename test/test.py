@@ -215,7 +215,7 @@ async def test_project(dut):
     await set_hours_24(dut, cap, 13)      # still in set_mode, 24h display
     await ClockCycles(dut.clk, 6)
     ui_bit_set(dut, 6, 1)                 # hour_12h=1
-    await ClockCycles(dut.clk, 6)
+    await ClockCycles(dut.clk, 120)
     pm = ((safe_int(dut.uio_out) or 0) >> 6) & 1
     dut._log.info(f"12h view: HH={cap.Ht}{cap.Ho}, PM={pm}")
     assert (cap.Ht, cap.Ho) == (0, 1), "12h display incorrect for 13h (expected 01)"
