@@ -14,7 +14,7 @@
 `default_nettype none
 
 // ===================== TOP =======================
-module tt_um_example (
+module tt_um_willwhang (
     input  wire [7:0] ui_in,
     output wire [7:0] uo_out,   // [7]=colon, [6:0]={a..g}
     input  wire [7:0] uio_in,

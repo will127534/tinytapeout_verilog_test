@@ -6,7 +6,7 @@ This design turns a **50/60 Hz AC tick** into a stable **HH:MM:SS** clock with o
 
 ## How it works
 
-### Top-level interface (TinyTapeout-style wrapper `tt_um_example`)
+### Top-level interface (TinyTapeout-style wrapper `tt_um_willwhang`)
 
 **Inputs (`ui_in`)**
 - `ui_in[0]` – **PPS** (optional). A rising edge realigns the second boundary (must be ≥ 1 AC tick wide).
@@ -73,9 +73,9 @@ This design turns a **50/60 Hz AC tick** into a stable **HH:MM:SS** clock with o
 
 ### Simulation (Icarus Verilog)
 
-1) Put `main.v` and `tb_tt_um_example.v` in the same directory.  
+1) Put `main.v` and `tb.v` in the same directory.  
 2) Build & run:
 ```bash
-iverilog -o sim.vvp main.v tb_tt_um_example.v
+iverilog -o sim.vvp main.v tb.v
 vvp sim.vvp
-# Optional: gtkwave tb_tt_um_example.vcd
+# Optional: gtkwave tb.vcd

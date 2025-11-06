@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: © 2024 Tiny Tapeout
 # SPDX-License-Identifier: Apache-2.0
 #
-# Robust cocotb test for tt_um_example
+# Robust cocotb test for tt_um_willwhang
 # - Handles X/Z on startup by waiting for resolvable values
 # - Debounce, no-cascade, 12h+PM, 1 Hz pulse, PPS align
 #
